@@ -1,0 +1,17 @@
+# Ignore raw and uncompressed heavy CSV datasets (>100MB)
+data/*.csv
+
+# Python & Jupyter
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
