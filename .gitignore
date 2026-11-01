@@ -2,15 +2,9 @@
 # Raw/uncompressed CSVs and processed exports can be large
 # Keep the source notebooks/docs tracked, but ignore generated outputs
 /data/*.csv
-/data/*.csv.gz
 /data/*.parquet
 /data/*.pkl
 /data/*.joblib
-
-# Model outputs and training artifacts
-models/
-*.pkl
-*.joblib
 
 # Python & Jupyter
 __pycache__/
