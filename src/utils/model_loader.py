@@ -28,10 +28,29 @@ def _artifact_path(filename: str) -> Path:
 
 @st.cache_data
 def load_holdout_comparison() -> pd.DataFrame:
-    """Loads the holdout evaluation results for the 3 candidate models."""
-    path = _artifact_path("holdout_model_comparison.csv")
-    if path.exists():
-        return pd.read_csv(path)
+    """Loads the holdout evaluation results for the candidate models."""
+    for filename in ["holdout_model_comparison.csv", "group_holdout_results.csv"]:
+        p = _artifact_path(filename)
+        if p.exists():
+            return pd.read_csv(p)
+    return pd.DataFrame()
+
+
+@st.cache_data
+def load_random_split_results() -> pd.DataFrame:
+    """Loads conventional random split baseline for comparison."""
+    p = _artifact_path("random_split_results.csv")
+    if p.exists():
+        return pd.read_csv(p)
+    return pd.DataFrame()
+
+
+@st.cache_data
+def load_multiseed_summary() -> pd.DataFrame:
+    """Loads multi-seed duplicate holdout summary (5 seeds)."""
+    p = _artifact_path("group_holdout_multiseed_summary.csv")
+    if p.exists():
+        return pd.read_csv(p)
     return pd.DataFrame()
 
 

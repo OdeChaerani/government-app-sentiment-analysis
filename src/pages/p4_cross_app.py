@@ -54,19 +54,45 @@ def render_cross_app_page(df: pd.DataFrame | None = None):
         )
         return
 
-    # The LOAO experiment uses Linear SVM; source the in-domain baseline from
-    # the saved holdout table when it is available.
+    # Multi-Model LOAO Selection
+    models_available = []
+    if "model" in df_loao.columns:
+        preferred = ["LinearSVM_SGD", "MultinomialNB", "RandomForest", "MajorityBaseline"]
+        models_available = [m for m in preferred if m in df_loao["model"].values]
+        if not models_available:
+            models_available = sorted(df_loao["model"].unique().tolist())
+
+    if models_available:
+        c_sel1, c_sel2 = st.columns([1.5, 2.5])
+        with c_sel1:
+            selected_model = st.selectbox(
+                "Select Model for Cross-App Inspection:",
+                options=models_available,
+                index=0
+            )
+        df_loao_view = df_loao[df_loao["model"] == selected_model].copy().reset_index(drop=True)
+    else:
+        selected_model = "LinearSVM_SGD"
+        df_loao_view = df_loao.copy()
+
+    # Column name normalization
+    if "pure_test_rows" in df_loao_view.columns and "pure_test_rows_n_apps_eq_1" not in df_loao_view.columns:
+        df_loao_view["pure_test_rows_n_apps_eq_1"] = df_loao_view["pure_test_rows"]
+    if "pure_macro_f1" in df_loao_view.columns and "pure_macro_f1_n_apps_eq_1" not in df_loao_view.columns:
+        df_loao_view["pure_macro_f1_n_apps_eq_1"] = df_loao_view["pure_macro_f1"]
+
+    # In-domain baseline for the selected model
     baseline_f1 = None
-    if not df_holdout.empty:
-        svm_rows = df_holdout[df_holdout['model'] == 'LinearSVM_SGD']
-        if not svm_rows.empty:
-            baseline_f1 = float(svm_rows.iloc[0]['macro_f1'])
+    if not df_holdout.empty and "model" in df_holdout.columns:
+        m_rows = df_holdout[df_holdout['model'] == selected_model]
+        if not m_rows.empty:
+            baseline_f1 = float(m_rows.iloc[0]['macro_f1'])
 
     # 1. KPI Summary Cards
-    mean_loao_f1 = df_loao['macro_f1'].mean()
-    std_loao_f1 = df_loao['macro_f1'].std()
-    best_app_row = df_loao.sort_values('macro_f1', ascending=False).iloc[0]
-    hardest_app_row = df_loao.sort_values('macro_f1', ascending=True).iloc[0]
+    mean_loao_f1 = df_loao_view['macro_f1'].mean()
+    std_loao_f1 = df_loao_view['macro_f1'].std()
+    best_app_row = df_loao_view.sort_values('macro_f1', ascending=False).iloc[0]
+    hardest_app_row = df_loao_view.sort_values('macro_f1', ascending=True).iloc[0]
 
     k1, k2, k3, k4 = st.columns(4)
     render_kpi_card(
@@ -139,15 +165,15 @@ def render_cross_app_page(df: pd.DataFrame | None = None):
 
     # 3. LOAO Performance Matrix Table
     st.markdown(
-        textwrap.dedent("""
+        textwrap.dedent(f"""
         <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">
-             LOAO Experimental Performance Matrix
+             {translate("LOAO Experimental Performance Matrix")}
         </div>
         """).strip(),
         unsafe_allow_html=True
     )
 
-    loao_table = df_loao.copy()
+    loao_table = df_loao_view.copy()
     loao_table['train_rows'] = loao_table['train_rows'].apply(lambda x: f"{x:,}")
     loao_table['test_rows'] = loao_table['test_rows'].apply(lambda x: f"{x:,}")
     loao_table['accuracy'] = loao_table['accuracy'].apply(lambda x: f"{x*100:.2f}%")
@@ -164,15 +190,15 @@ def render_cross_app_page(df: pd.DataFrame | None = None):
         use_container_width=True,
         hide_index=True,
         column_config={
-            "target_app": st.column_config.TextColumn("Unseen Target App"),
-            "train_rows": st.column_config.TextColumn("Train Reviews"),
-            "test_rows": st.column_config.TextColumn("Test Reviews"),
-            "accuracy": st.column_config.TextColumn("Accuracy"),
-            "macro_precision": st.column_config.TextColumn("Macro Precision"),
-            "macro_recall": st.column_config.TextColumn("Macro Recall"),
-            "macro_f1": st.column_config.TextColumn("Natural LOAO F1 "),
-            "pure_test_rows_n_apps_eq_1": st.column_config.TextColumn("Strict Test Rows"),
-            "pure_macro_f1_n_apps_eq_1": st.column_config.TextColumn("Strict LOAO F1 ")
+            "target_app": st.column_config.TextColumn(translate("Unseen Target App")),
+            "train_rows": st.column_config.TextColumn(translate("Train Reviews")),
+            "test_rows": st.column_config.TextColumn(translate("Test Reviews")),
+            "accuracy": st.column_config.TextColumn(translate("Accuracy")),
+            "macro_precision": st.column_config.TextColumn(translate("Macro Precision")),
+            "macro_recall": st.column_config.TextColumn(translate("Macro Recall")),
+            "macro_f1": st.column_config.TextColumn(translate("Natural LOAO F1 ")),
+            "pure_test_rows_n_apps_eq_1": st.column_config.TextColumn(translate("Strict Test Rows")),
+            "pure_macro_f1_n_apps_eq_1": st.column_config.TextColumn(translate("Strict LOAO F1 "))
         }
     )
 
@@ -181,21 +207,21 @@ def render_cross_app_page(df: pd.DataFrame | None = None):
     # 4. Visualizations Row
     c_chart1, c_chart2 = st.columns(2)
     with c_chart1:
-        st.plotly_chart(create_loao_performance_chart(df_loao), use_container_width=True)
+        st.plotly_chart(create_loao_performance_chart(df_loao_view), use_container_width=True)
     with c_chart2:
         if baseline_f1 is not None:
-            st.plotly_chart(create_baseline_vs_loao_chart(baseline_f1, df_loao), use_container_width=True)
+            st.plotly_chart(create_baseline_vs_loao_chart(baseline_f1, df_loao_view), use_container_width=True)
         else:
             st.info("The holdout baseline artifact is not available, so the baseline comparison is hidden.")
 
     # Data-driven notes: every displayed metric is computed from the saved
     # notebook results or the loaded processed dataset.
     st.markdown("### Findings from the saved experiment")
-    top_rows = df_loao.sort_values("macro_f1", ascending=False).head(2)
-    low_row = df_loao.sort_values("macro_f1", ascending=True).iloc[0]
+    top_rows = df_loao_view.sort_values("macro_f1", ascending=False).head(2)
+    low_row = df_loao_view.sort_values("macro_f1", ascending=True).iloc[0]
     strict_drop = None
-    if "pure_macro_f1_n_apps_eq_1" in df_loao.columns:
-        strict_drop = (df_loao["macro_f1"] - df_loao["pure_macro_f1_n_apps_eq_1"]).mean()
+    if "pure_macro_f1_n_apps_eq_1" in df_loao_view.columns:
+        strict_drop = (df_loao_view["macro_f1"] - df_loao_view["pure_macro_f1_n_apps_eq_1"]).mean()
 
     finding_cols = st.columns(2)
     with finding_cols[0]:
@@ -233,3 +259,51 @@ def render_cross_app_page(df: pd.DataFrame | None = None):
                 f"Across target apps, strict unseen-text Macro-F1 is lower by "
                 f"{strict_drop:.4f} on average than natural LOAO Macro-F1."
             )
+
+    # Multi-Model LOAO Cross-App Benchmark Table
+    if len(models_available) > 1 and "model" in df_loao.columns:
+        st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
+        
+        c_title, c_toggle = st.columns([3, 1.8])
+        with c_title:
+            st.markdown(
+                textwrap.dedent(f"""
+                <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">
+                     {translate("Cross-App Comparison Across All Models")}
+                </div>
+                """).strip(),
+                unsafe_allow_html=True
+            )
+        with c_toggle:
+            comp_metric_choice = st.radio(
+                "Pilih Metrik Evaluasi:",
+                options=["Macro-F1", translate("Accuracy")],
+                index=0,
+                horizontal=True,
+                key="loao_comp_metric_radio"
+            )
+
+        metric_col = "accuracy" if comp_metric_choice in ["Accuracy", translate("Accuracy"), "Akurasi"] else "macro_f1"
+        pivot_loao = df_loao.pivot(index="target_app", columns="model", values=metric_col)[models_available].reset_index()
+
+        multi_table = pivot_loao.copy()
+        for m in models_available:
+            if metric_col == "accuracy":
+                multi_table[m] = multi_table[m].apply(lambda x: f"{x*100:.2f}%")
+            else:
+                multi_table[m] = multi_table[m].apply(lambda x: f"{x:.4f}")
+
+        col_config = {
+            "target_app": st.column_config.TextColumn(translate("Unseen Target App")),
+            "LinearSVM_SGD": st.column_config.TextColumn("Linear SVM (SGD)"),
+            "MultinomialNB": st.column_config.TextColumn("Multinomial NB"),
+            "RandomForest": st.column_config.TextColumn("Random Forest"),
+            "MajorityBaseline": st.column_config.TextColumn("Majority Baseline")
+        }
+
+        st.dataframe(
+            multi_table,
+            use_container_width=True,
+            hide_index=True,
+            column_config=col_config
+        )

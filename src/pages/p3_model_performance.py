@@ -16,11 +16,48 @@ from src.components.charts import (
 )
 from src.utils.model_loader import (
     load_holdout_comparison,
+    load_random_split_results,
     load_confusion_matrices,
     load_classification_reports,
     load_model_bundle,
 )
 from src.utils.i18n import translate
+
+
+def _format_tfidf_summary(vec) -> str:
+    """Formats TF-IDF parameters into human-readable specifications."""
+    if not vec:
+        return "Unavailable"
+    p = vec.get_params()
+    ngram = p.get("ngram_range", (1, 1))
+    mf = p.get("max_features")
+    max_feat_str = f"{mf:,}" if mf else "None (unlimited)"
+    sublinear = "True (logarithmic)" if p.get("sublinear_tf") else "False"
+    norm = p.get("norm", "l2").upper() if p.get("norm") else "None"
+    return f"N-gram: {ngram} (Unigram + Bigram) | Max Features: {max_feat_str} | Sublinear TF: {sublinear} | Norm: {norm}"
+
+
+def _format_model_summary(mod, model_name: str = "") -> str:
+    """Formats model hyperparameters into human-readable specifications."""
+    if not mod:
+        return "Unavailable"
+    p = mod.get_params()
+    cls_name = type(mod).__name__
+    if "Multinomial" in cls_name:
+        alpha = p.get("alpha", 0.5)
+        fit_prior = p.get("fit_prior", True)
+        return f"Alpha: {alpha} | Fit Prior: {fit_prior} | Balancing: sample_weight=balanced"
+    elif "SGD" in cls_name:
+        loss = p.get("loss", "hinge")
+        max_iter = p.get("max_iter", 1000)
+        penalty = p.get("penalty", "l2")
+        return f"Loss: {loss} (Linear SVM) | Max Iter: {max_iter} | Penalty: {penalty} | Class Weight: balanced"
+    elif "Forest" in cls_name:
+        n_est = p.get("n_estimators", 100)
+        cw = p.get("class_weight", "balanced_subsample")
+        return f"Trees: {n_est} | Class Weight: {cw}"
+    else:
+        return ", ".join(f"{k}: {v}" for k, v in list(p.items())[:3])
 
 
 def render_model_performance_page():
@@ -163,6 +200,40 @@ def render_model_performance_page():
         }
     )
 
+    # Duplicate-Aware vs Conventional Random Split Comparison Table
+    df_rnd = load_random_split_results()
+    if not df_rnd.empty:
+        st.markdown("<div style='margin-top: 1.5rem;'></div>", unsafe_allow_html=True)
+        st.markdown(
+            textwrap.dedent("""
+            <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem;">
+                 Duplicate-Aware Evaluation vs. Conventional Random Split
+            </div>
+            """).strip(),
+            unsafe_allow_html=True
+        )
+        
+        comp_rows = []
+        for m_name in df_models["model"].unique():
+            sub_rnd = df_rnd[df_rnd["model"] == m_name]
+            sub_grp = df_models[df_models["model"] == m_name]
+            if not sub_rnd.empty and not sub_grp.empty:
+                r_rnd = sub_rnd.iloc[0]
+                r_grp = sub_grp.iloc[0]
+                comp_rows.append({
+                    "Model": m_name,
+                    "Random Accuracy": f"{r_rnd['accuracy']*100:.2f}%",
+                    "Group Accuracy": f"{r_grp['accuracy']*100:.2f}%",
+                    "Delta Acc": f"{(r_grp['accuracy'] - r_rnd['accuracy'])*100:+.2f}%",
+                    "Random Macro-F1": f"{r_rnd['macro_f1']:.4f}",
+                    "Group Macro-F1": f"{r_grp['macro_f1']:.4f}",
+                    "Delta Macro-F1": f"{(r_grp['macro_f1'] - r_rnd['macro_f1']):+.4f}",
+                })
+        
+        if comp_rows:
+            st.dataframe(pd.DataFrame(comp_rows), use_container_width=True, hide_index=True)
+            st.caption("ℹ️ Random split leaks 43.89% duplicate text into test split, inflating performance. Duplicate-Group Holdout strictly partitions duplicate groups (0% leakage), revealing genuine out-of-sample generalization.")
+
     st.markdown("<div style='margin-top: 1.5rem;'></div>", unsafe_allow_html=True)
 
     # 3. Visualizations Row: Ranking & Multi-Metric
@@ -223,26 +294,57 @@ def render_model_performance_page():
 
             acc_val = rep.get('accuracy', 0.0)
             macro_f1_val = rep.get('macro avg', {}).get('f1-score', 0.0)
+            sel_row = df_models[df_models["model"] == selected_model]
+            hyper_str = sel_row["loss_or_alpha"].iloc[0] if not sel_row.empty and "loss_or_alpha" in sel_row and pd.notna(sel_row["loss_or_alpha"].iloc[0]) else "-"
+            bal_str = sel_row["balancing"].iloc[0] if not sel_row.empty and "balancing" in sel_row and pd.notna(sel_row["balancing"].iloc[0]) else "None"
+            train_time = f"{sel_row['training_time_sec'].iloc[0]:.1f}s" if not sel_row.empty and "training_time_sec" in sel_row and pd.notna(sel_row["training_time_sec"].iloc[0]) else "-"
+
             st.markdown(
                 textwrap.dedent(f"""
-                <div style="margin-top: 1rem; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6;">
-                    <div>• <b>Overall Accuracy:</b> {acc_val*100:.1f}%</div>
-                    <div>• <b>Macro Average F1:</b> {macro_f1_val:.2f}</div>
-                    <div>• <b>Total Evaluated:</b> {rep.get('macro avg', {}).get('support', support_total):,} reviews</div>
+                <div style="margin-top: 1rem; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
+                    <div>• <b>{translate('Overall Accuracy')}:</b> {acc_val*100:.2f}%</div>
+                    <div>• <b>{translate('Macro Average F1')}:</b> {macro_f1_val:.4f}</div>
+                    <div>• <b>{translate('Total Evaluated')}:</b> {rep.get('macro avg', {}).get('support', support_total):,} {translate('reviews')}</div>
+                    <div>• <b>{translate('Model Hyperparameter')}:</b> <code>{hyper_str}</code></div>
+                    <div>• <b>{translate('Class Balancing')}:</b> <code>{bal_str}</code> ({translate('Training Duration')}: {train_time})</div>
                 </div>
                 """).strip(),
                 unsafe_allow_html=True
             )
 
-    # Render settings from the persisted inference bundle rather than a copied config.
+    # Active Production Inference Model Bundle
     if bundle:
         vectorizer = bundle.get("vectorizer")
         model = bundle.get("model")
-        config = {
-            "Inference model": bundle.get("model_name", type(model).__name__ if model else "Unavailable"),
-            "Text column": bundle.get("text_column", "Unavailable"),
-            "TF-IDF parameters": str(vectorizer.get_params()) if vectorizer else "Unavailable",
-            "Model parameters": str(model.get_params()) if model else "Unavailable",
-        }
-        st.markdown("#### Serialized inference configuration")
-        st.dataframe(pd.DataFrame(config.items(), columns=["Setting", "Value"]), use_container_width=True, hide_index=True)
+        mod_name = bundle.get("model_name", type(model).__name__ if model else "Unavailable")
+
+        st.markdown("<div style='margin-top: 2rem;'></div>", unsafe_allow_html=True)
+        st.markdown(
+            textwrap.dedent(f"""
+            <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.3rem;">
+                 {translate("Active Production Model for AI Inference")}
+            </div>
+            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.8rem;">
+                 {translate("This model was selected based on the highest Macro-F1 in Duplicate-Group Holdout and is serialized in ")}<code>models/rating_classifier_bundle.pkl</code>{translate(" to power live predictions on Page 5.")}
+            </div>
+            """).strip(),
+            unsafe_allow_html=True
+        )
+
+        config_rows = [
+            {"Setting": translate("Inference Model"), "Value": f"{mod_name} (Holdout Macro-F1: {best_macro_f1:.4f})"},
+            {"Setting": translate("Text Feature Column"), "Value": bundle.get("text_column", "content_clean")},
+            {"Setting": translate("TF-IDF Vectorizer"), "Value": _format_tfidf_summary(vectorizer)},
+            {"Setting": translate("Model Hyperparameters"), "Value": _format_model_summary(model, mod_name)},
+            {"Setting": translate("Output Classes"), "Value": ", ".join(bundle.get("labels", ["Negative", "Neutral", "Positive"]))}
+        ]
+
+        st.dataframe(
+            pd.DataFrame(config_rows),
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Setting": st.column_config.TextColumn(translate("Setting"), width="medium"),
+                "Value": st.column_config.TextColumn(translate("Value"), width="large")
+            }
+        )

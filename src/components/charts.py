@@ -322,19 +322,22 @@ def create_loao_performance_chart(df_loao: pd.DataFrame, height: int = 360) -> g
     ))
 
     # Strict Macro-F1
-    if 'pure_macro_f1_n_apps_eq_1' in df_loao.columns:
+    pure_col = 'pure_macro_f1_n_apps_eq_1' if 'pure_macro_f1_n_apps_eq_1' in df_loao.columns else ('pure_macro_f1' if 'pure_macro_f1' in df_loao.columns else None)
+    if pure_col:
         fig.add_trace(go.Bar(
-        name=translate("Strict Cross-App F1 (Pure Unseen)"),
+            name=translate("Strict Cross-App F1 (Pure Unseen)"),
             x=df_loao['target_app'],
-            y=df_loao['pure_macro_f1_n_apps_eq_1'],
+            y=df_loao[pure_col],
             marker_color=THEME["accent_secondary"],
-            text=[f"{v:.4f}" for v in df_loao['pure_macro_f1_n_apps_eq_1']],
+            text=[f"{v:.4f}" for v in df_loao[pure_col]],
             textposition="outside",
             hovertemplate=f"<b>%{{x}}</b><br>{translate('Strict LOAO Macro-F1:')} %{{y:.4f}}<extra></extra>"
         ))
 
     apply_common_layout(fig, title="LOAO Macro-F1 Across Target Applications", height=height)
-    fig.update_yaxes(title_text=translate("Macro-F1 Score"), range=[0.4, 0.72])
+    y_min = max(0.0, float(df_loao['macro_f1'].min()) - 0.08)
+    y_max = min(1.0, float(df_loao['macro_f1'].max()) + 0.08)
+    fig.update_yaxes(title_text=translate("Macro-F1 Score"), range=[y_min, y_max])
     return fig
 
 
@@ -367,7 +370,9 @@ def create_baseline_vs_loao_chart(baseline_f1: float, df_loao: pd.DataFrame, hei
     ))
 
     apply_common_layout(fig, title="Random Split Baseline vs. LOAO Cross-App Generalization", height=height)
-    fig.update_yaxes(title_text=translate("Macro-F1 Score"), range=[0.45, 0.72])
+    y_min = max(0.0, min(float(df_loao['macro_f1'].min()), baseline_f1) - 0.08)
+    y_max = min(1.0, max(float(df_loao['macro_f1'].max()), baseline_f1) + 0.08)
+    fig.update_yaxes(title_text=translate("Macro-F1 Score"), range=[y_min, y_max])
     fig.update_layout(showlegend=False)
     return fig
 

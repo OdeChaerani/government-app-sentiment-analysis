@@ -1,0 +1,4 @@
+model,mean_delta_macro_f1,n_seeds_macro_f1_lower,mean_delta_accuracy,n_seeds_accuracy_lower,n_seeds
+LinearSVM_SGD,-0.003024255640233031,3,-0.011450172600484244,4,5
+MultinomialNB,-0.008603770756780493,5,-0.021172220218153282,5,5
+RandomForest,-0.007941252124630904,4,-0.01654620933048112,4,5
